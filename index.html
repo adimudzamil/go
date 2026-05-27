@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>PUBG Interactive Experience</title>
+    <title>PUBG Interactive Experience - Advanced UI</title>
     <style>
         body, html {
             margin: 0;
@@ -12,7 +12,7 @@
             height: 100%;
             overflow: hidden;
             background-color: #050505;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             -webkit-tap-highlight-color: transparent;
         }
 
@@ -22,10 +22,64 @@
             position: absolute;
             top: 0;
             left: 0;
-            touch-action: none; /* Prevents mobile browser pull-to-refresh and accidental zooming */
+            z-index: 1;
         }
 
-        /* Back Button styled gracefully for both Desktop and Mobile Mobile */
+        /* Responsive SVG overlay container tracking WebGL plane limits */
+        #ui-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 2;
+            pointer-events: none; /* Passes taps/clicks straight down to WebGL Raycaster */
+            transition: opacity 0.3s;
+        }
+
+        /* Interactive Outline Glow Paths */
+        .outline-path {
+            fill: transparent;
+            stroke: rgba(0, 204, 255, 0.8);
+            stroke-width: 3;
+            stroke-dasharray: 8 4;
+            opacity: 0;
+            pointer-events: auto; /* Listens for hover metrics independently */
+            cursor: pointer;
+            transition: opacity 0.3s, stroke-dashoffset 2s linear;
+        }
+        
+        .outline-path:hover {
+            opacity: 1;
+            stroke-dashoffset: -50;
+            filter: drop-shadow(0px 0px 8px rgba(0, 204, 255, 0.9));
+        }
+
+        /* Modern CSS Floating UI Tooltip */
+        #tooltip {
+            position: absolute;
+            z-index: 3;
+            background: rgba(10, 25, 40, 0.85);
+            border: 1px solid rgba(0, 204, 255, 0.5);
+            color: #ffffff;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            box-shadow: 0 4px 15px rgba(0, 204, 255, 0.25), inset 0 0 8px rgba(0,204,255,0.1);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            pointer-events: none;
+            opacity: 0;
+            transform: translate(-50%, -130%) scale(0.9);
+            transition: opacity 0.2s, transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        #tooltip.active {
+            opacity: 1;
+            transform: translate(-50%, -130%) scale(1);
+        }
+
+        /* Back Button configuration */
         #back-btn {
             position: absolute;
             bottom: 40px;
@@ -38,12 +92,10 @@
             font-weight: bold;
             text-transform: uppercase;
             letter-spacing: 2px;
-            font-size: 14px;
             cursor: pointer;
             opacity: 0;
             pointer-events: none;
             transition: opacity 0.4s, transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-            box-shadow: 0 10px 25px rgba(255, 60, 0, 0.4);
             border-radius: 4px;
             z-index: 10;
         }
@@ -51,12 +103,6 @@
             opacity: 1;
             pointer-events: auto;
             transform: translateX(-50%) translateY(0);
-        }
-        @media (hover: hover) {
-            #back-btn:hover {
-                background: #e03500;
-                transform: translateX(-50%) scale(1.05);
-            }
         }
     </style>
 
@@ -66,41 +112,49 @@
 <body>
 
     <div id="canvas-container"></div>
+
+    <svg id="ui-overlay" viewBox="0 0 768 1024">
+        <path id="path-helmet" class="outline-path" data-item="helmet"
+              d="M 28,452 C 28,420 50,380 100,378 C 150,376 175,410 195,430 C 210,445 195,485 160,495 C 120,505 50,490 28,452 Z" />
+        
+        <path id="path-vest" class="outline-path" data-item="vest"
+              d="M 125,750 C 120,740 160,735 200,738 C 240,740 250,755 260,780 C 270,810 290,850 280,920 C 270,955 160,965 120,950 C 95,940 90,830 110,790 Z" />
+    </svg>
+
+    <div id="tooltip">BPM</div>
+
     <button id="back-btn" onclick="resetView()">← Reset State</button>
 
     <script>
-        // --- 1. Coordinates Mapping Matrix ---
-        // Defined via UV spaces (0.0 to 1.0 from bottom-left corner of the image)
-        // These stay perfectly fixed onto the image assets no matter the viewport sizing
+        // --- 1. Configurations & Raycasting Coordinates ---
         const HOTSPOTS = {
             helmet: { x: 0.11, y: 0.56, radius: 0.09 }, 
-            pepsi:  { x: 0.11, y: 0.43, radius: 0.08 },
             vest:   { x: 0.24, y: 0.16, radius: 0.15 }
         };
 
         let isZoomed = false;
+        const tooltip = document.getElementById('tooltip');
+        const uiOverlay = document.getElementById('ui-overlay');
 
-        // --- 2. Scene Setup ---
+        // --- 2. Three.js Core Setup ---
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
         const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
         const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
         
-        // Handles high-DPI displays (Retina displays on iPhones/Macs) smoothly
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.setSize(window.innerWidth, window.innerHeight);
         container.appendChild(renderer.domElement);
 
-        // --- 3. Texture Initialization ---
+        // --- 3. Textures Loader ---
         const textureLoader = new THREE.TextureLoader();
         const textureBefore = textureLoader.load('before.png', () => { updatePlaneScale(); });
         const textureAfter = textureLoader.load('after.png');
 
-        // Fix for subtle textures updating artifacts on mobile iOS
         textureBefore.minFilter = THREE.LinearFilter;
         textureAfter.minFilter = THREE.LinearFilter;
 
-        // --- 4. Custom Cross-Platform GLSL Shader ---
+        // --- 4. Transition Shader ---
         const shaderMaterial = new THREE.ShaderMaterial({
             uniforms: {
                 uTexBefore: { value: textureBefore },
@@ -111,10 +165,7 @@
             },
             vertexShader: `
                 varying vec2 vUv;
-                void main() {
-                    vUv = uv;
-                    gl_Position = vec4(position, 1.0);
-                }
+                void main() { vUv = uv; gl_Position = vec4(position, 1.0); }
             `,
             fragmentShader: `
                 varying vec2 vUv;
@@ -127,7 +178,6 @@
                 void main() {
                     vec2 aspectCorrectedUv = vUv;
                     aspectCorrectedUv.x *= (uResolution.x / uResolution.y);
-                    
                     vec2 correctedEpicenter = uEpicenter;
                     correctedEpicenter.x *= (uResolution.x / uResolution.y);
 
@@ -139,7 +189,6 @@
 
                     vec4 colorBefore = texture2D(uTexBefore, vUv);
                     vec4 colorAfter = texture2D(uTexAfter, vUv);
-
                     gl_FragColor = mix(colorAfter, colorBefore, wave);
                 }
             `
@@ -149,14 +198,13 @@
         const mesh = new THREE.Mesh(geometry, shaderMaterial);
         scene.add(mesh);
 
-        // --- 5. Raycasting & Interaction Logic ---
+        // --- 5. Integrated Interactive Event Handlers ---
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
 
-        function handleInteraction(clientX, clientY) {
-            if (isZoomed) return;
+        function checkIntersect(clientX, clientY) {
+            if (isZoomed) return null;
 
-            // Normalize cross-platform mouse/touch coordinates (-1 to +1)
             mouse.x = (clientX / window.innerWidth) * 2 - 1;
             mouse.y = -(clientY / window.innerHeight) * 2 + 1;
 
@@ -164,72 +212,82 @@
             const intersects = raycaster.intersectObject(mesh);
 
             if (intersects.length > 0) {
-                // Fetch the exact UV coordinate that was tapped on the picture
                 const uv = intersects[0].uv;
-                
-                // Scan matrix list to find if user tapped close to our target assets
                 for (const key in HOTSPOTS) {
                     const spot = HOTSPOTS[key];
-                    const dist = Math.hypot(uv.x - spot.x, uv.y - spot.y);
-
-                    if (dist < spot.radius) {
-                        triggerExplosion(uv.x, uv.y);
-                        break;
+                    if (Math.hypot(uv.x - spot.x, uv.y - spot.y) < spot.radius) {
+                        return { name: key, uv: uv };
                     }
                 }
             }
+            return null;
         }
 
-        // Standard PC Clicks
-        window.addEventListener('click', (e) => handleInteraction(e.clientX, e.clientY));
-        
-        // Responsive iOS / Android Touch Support
+        // Global Mouse movement tracking for highlights and tooltips
+        window.addEventListener('mousemove', (e) => {
+            const hit = checkIntersect(e.clientX, e.clientY);
+            
+            if (hit) {
+                // Display outline paths globally via data-binding states
+                document.querySelectorAll('.outline-path').forEach(p => p.style.opacity = '0');
+                const path = document.getElementById(`path-${hit.name}`);
+                if (path) path.style.opacity = '1';
+
+                // Display custom tooltip if target is helmet
+                if (hit.name === 'helmet') {
+                    tooltip.style.left = `${e.clientX}px`;
+                    tooltip.style.top = `${e.clientY}px`;
+                    tooltip.classList.add('active');
+                } else {
+                    tooltip.classList.remove('active');
+                }
+            } else {
+                document.querySelectorAll('.outline-path').forEach(p => p.style.opacity = '0');
+                tooltip.classList.remove('active');
+            }
+        });
+
+        // Trigger cinematic click events
+        window.addEventListener('click', (e) => {
+            const hit = checkIntersect(e.clientX, e.clientY);
+            if (hit) {
+                tooltip.classList.remove('active');
+                uiOverlay.style.opacity = '0';
+                triggerExplosion(hit.uv.x, hit.uv.y);
+            }
+        });
+
+        // Touch device mobile support
         window.addEventListener('touchstart', (e) => {
-            if(e.touches.length > 0) {
-                handleInteraction(e.touches[0].clientX, e.touches[0].clientY);
+            if (e.touches.length > 0) {
+                const touch = e.touches[0];
+                const hit = checkIntersect(touch.clientX, touch.clientY);
+                if (hit) {
+                    uiOverlay.style.opacity = '0';
+                    triggerExplosion(hit.uv.x, hit.uv.y);
+                }
             }
         }, { passive: true });
 
-        // --- 6. Cinematic Animations ---
+        // --- 6. Core Animations ---
         function triggerExplosion(clickX, clickY) {
             isZoomed = true;
             shaderMaterial.uniforms.uEpicenter.value.set(clickX, clickY);
 
             const tl = gsap.timeline();
-
-            tl.to(shaderMaterial.uniforms.uTransitionProgress, {
-                value: 1.0,
-                duration: 1.3,
-                ease: "power2.out"
-            }, 0);
-
-            tl.to(mesh.scale, {
-                x: 2.5,
-                y: 2.5,
-                duration: 1.5,
-                ease: "expo.out"
-            }, 0);
+            tl.to(shaderMaterial.uniforms.uTransitionProgress, { value: 1.0, duration: 1.3, ease: "power2.out" }, 0);
+            tl.to(mesh.scale, { x: 2.5, y: 2.5, duration: 1.5, ease: "expo.out" }, 0);
 
             const targetX = (0.5 - clickX) * 2.5;
             const targetY = (clickY - 0.5) * 2.5;
-
-            tl.to(mesh.position, {
-                x: targetX,
-                y: targetY,
-                duration: 1.5,
-                ease: "expo.out",
-                onComplete: () => {
-                    document.getElementById('back-btn').classList.add('active');
-                }
+            tl.to(mesh.position, { x: targetX, y: targetY, duration: 1.5, ease: "expo.out", 
+                onComplete: () => { document.getElementById('back-btn').classList.add('active'); }
             }, 0);
 
-            // Kinetic Screen Shake (Works beautifully on mobile graphics chips)
             tl.to(mesh.position, {
                 x: targetX + (Math.random() - 0.5) * 0.03,
                 y: targetY + (Math.random() - 0.5) * 0.03,
-                duration: 0.04,
-                repeat: 4,
-                yoyo: true
+                duration: 0.04, repeat: 4, yoyo: true
             }, 0.05);
         }
 
@@ -239,28 +297,36 @@
             const tl = gsap.timeline();
             tl.to(mesh.scale, { x: 1, y: 1, duration: 1.2, ease: "power3.inOut" }, 0);
             tl.to(mesh.position, { x: 0, y: 0, duration: 1.2, ease: "power3.inOut" }, 0);
-            tl.to(shaderMaterial.uniforms.uTransitionProgress, {
-                value: 0.0,
-                duration: 0.9,
-                ease: "power2.inOut"
-            }, 0.1);
+            tl.to(shaderMaterial.uniforms.uTransitionProgress, { value: 0.0, duration: 0.9, ease: "power2.inOut" }, 0.1);
 
-            tl.call(() => { isZoomed = false; });
+            tl.call(() => { 
+                isZoomed = false; 
+                uiOverlay.style.opacity = '1';
+            });
         }
 
-        // --- 7. Aspect Ratio & Cover Logic ---
+        // --- 7. Aspect Auto Sizing ---
         function updatePlaneScale() {
             if (!textureBefore.image) return;
             
-            const imageAspect = 3 / 4; // Native vertical/portrait matrix ratio of your image assets
+            const imageAspect = 3 / 4; 
             const screenAspect = window.innerWidth / window.innerHeight;
 
+            let w, h;
             if (screenAspect > imageAspect) {
                 mesh.scale.set(1, 1 / (screenAspect / imageAspect), 1);
+                h = window.innerHeight;
+                w = h * imageAspect;
             } else {
                 mesh.scale.set((screenAspect / imageAspect), 1, 1);
+                w = window.innerWidth;
+                h = w / imageAspect;
             }
             
+            // Constrain SVG interface overlay dimensions to fit the WebGL rendering frame exactly
+            uiOverlay.style.width = `${w}px`;
+            uiOverlay.style.height = `${h}px`;
+
             shaderMaterial.uniforms.uResolution.value.set(
                 window.innerWidth * window.devicePixelRatio, 
                 window.innerHeight * window.devicePixelRatio
