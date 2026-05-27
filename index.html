@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>PUBG Interactive Experience - Advanced UI</title>
+    <title>PUBG Interactive Experience - Toggle Mode</title>
     <style>
         body, html {
             margin: 0;
@@ -25,25 +25,25 @@
             z-index: 1;
         }
 
-        /* Responsive SVG overlay container tracking WebGL plane limits */
+        /* Clickable SVG UI layout layer */
         #ui-overlay {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
             z-index: 2;
-            pointer-events: none; /* Passes taps/clicks straight down to WebGL Raycaster */
-            transition: opacity 0.3s;
+            pointer-events: none;
+            transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
-        /* Interactive Outline Glow Paths */
+        /* Outline Glow Paths */
         .outline-path {
             fill: transparent;
             stroke: rgba(0, 204, 255, 0.8);
             stroke-width: 3;
             stroke-dasharray: 8 4;
             opacity: 0;
-            pointer-events: auto; /* Listens for hover metrics independently */
+            pointer-events: auto;
             cursor: pointer;
             transition: opacity 0.3s, stroke-dashoffset 2s linear;
         }
@@ -54,7 +54,7 @@
             filter: drop-shadow(0px 0px 8px rgba(0, 204, 255, 0.9));
         }
 
-        /* Modern CSS Floating UI Tooltip */
+        /* Floating Tooltip UI Element */
         #tooltip {
             position: absolute;
             z-index: 3;
@@ -78,32 +78,6 @@
             opacity: 1;
             transform: translate(-50%, -130%) scale(1);
         }
-
-        /* Back Button configuration */
-        #back-btn {
-            position: absolute;
-            bottom: 40px;
-            left: 50%;
-            transform: translateX(-50%) translateY(20px);
-            padding: 14px 32px;
-            background: #ff3c00;
-            color: white;
-            border: none;
-            font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            cursor: pointer;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.4s, transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-            border-radius: 4px;
-            z-index: 10;
-        }
-        #back-btn.active {
-            opacity: 1;
-            pointer-events: auto;
-            transform: translateX(-50%) translateY(0);
-        }
     </style>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -123,20 +97,18 @@
 
     <div id="tooltip">BPM</div>
 
-    <button id="back-btn" onclick="resetView()">← Reset State</button>
-
     <script>
-        // --- 1. Configurations & Raycasting Coordinates ---
+        // --- 1. Configurations & State Mapping ---
         const HOTSPOTS = {
             helmet: { x: 0.11, y: 0.56, radius: 0.09 }, 
             vest:   { x: 0.24, y: 0.16, radius: 0.15 }
         };
 
-        let isZoomed = false;
+        let isZoomed = false; // State flag tracker
         const tooltip = document.getElementById('tooltip');
         const uiOverlay = document.getElementById('ui-overlay');
 
-        // --- 2. Three.js Core Setup ---
+        // --- 2. Three.js Engine Setup ---
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
         const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -146,7 +118,7 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         container.appendChild(renderer.domElement);
 
-        // --- 3. Textures Loader ---
+        // --- 3. Textures Asset Pipeline ---
         const textureLoader = new THREE.TextureLoader();
         const textureBefore = textureLoader.load('before.png', () => { updatePlaneScale(); });
         const textureAfter = textureLoader.load('after.png');
@@ -154,7 +126,7 @@
         textureBefore.minFilter = THREE.LinearFilter;
         textureAfter.minFilter = THREE.LinearFilter;
 
-        // --- 4. Transition Shader ---
+        // --- 4. Cross-fade Fragment Shader ---
         const shaderMaterial = new THREE.ShaderMaterial({
             uniforms: {
                 uTexBefore: { value: textureBefore },
@@ -198,13 +170,11 @@
         const mesh = new THREE.Mesh(geometry, shaderMaterial);
         scene.add(mesh);
 
-        // --- 5. Integrated Interactive Event Handlers ---
+        // --- 5. Integrated Interactive Event Listeners ---
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
 
         function checkIntersect(clientX, clientY) {
-            if (isZoomed) return null;
-
             mouse.x = (clientX / window.innerWidth) * 2 - 1;
             mouse.y = -(clientY / window.innerHeight) * 2 + 1;
 
@@ -223,17 +193,17 @@
             return null;
         }
 
-        // Global Mouse movement tracking for highlights and tooltips
+        // Mouse move interactions (Only track highlights if zoomed out)
         window.addEventListener('mousemove', (e) => {
+            if (isZoomed) return;
+
             const hit = checkIntersect(e.clientX, e.clientY);
             
             if (hit) {
-                // Display outline paths globally via data-binding states
                 document.querySelectorAll('.outline-path').forEach(p => p.style.opacity = '0');
                 const path = document.getElementById(`path-${hit.name}`);
                 if (path) path.style.opacity = '1';
 
-                // Display custom tooltip if target is helmet
                 if (hit.name === 'helmet') {
                     tooltip.style.left = `${e.clientX}px`;
                     tooltip.style.top = `${e.clientY}px`;
@@ -247,24 +217,34 @@
             }
         });
 
-        // Trigger cinematic click events
+        // Toggle state logic on Click
         window.addEventListener('click', (e) => {
-            const hit = checkIntersect(e.clientX, e.clientY);
-            if (hit) {
-                tooltip.classList.remove('active');
-                uiOverlay.style.opacity = '0';
-                triggerExplosion(hit.uv.x, hit.uv.y);
+            if (isZoomed) {
+                // If already zoomed in, clicking anywhere resets the view back to normal
+                resetView();
+            } else {
+                // If zoomed out, check if an item was targeted
+                const hit = checkIntersect(e.clientX, e.clientY);
+                if (hit) {
+                    tooltip.classList.remove('active');
+                    uiOverlay.style.opacity = '0';
+                    triggerExplosion(hit.uv.x, hit.uv.y);
+                }
             }
         });
 
-        // Touch device mobile support
+        // Touch device toggle support
         window.addEventListener('touchstart', (e) => {
             if (e.touches.length > 0) {
                 const touch = e.touches[0];
-                const hit = checkIntersect(touch.clientX, touch.clientY);
-                if (hit) {
-                    uiOverlay.style.opacity = '0';
-                    triggerExplosion(hit.uv.x, hit.uv.y);
+                if (isZoomed) {
+                    resetView();
+                } else {
+                    const hit = checkIntersect(touch.clientX, touch.clientY);
+                    if (hit) {
+                        uiOverlay.style.opacity = '0';
+                        triggerExplosion(hit.uv.x, hit.uv.y);
+                    }
                 }
             }
         }, { passive: true });
@@ -280,10 +260,9 @@
 
             const targetX = (0.5 - clickX) * 2.5;
             const targetY = (clickY - 0.5) * 2.5;
-            tl.to(mesh.position, { x: targetX, y: targetY, duration: 1.5, ease: "expo.out", 
-                onComplete: () => { document.getElementById('back-btn').classList.add('active'); }
-            }, 0);
+            tl.to(mesh.position, { x: targetX, y: targetY, duration: 1.5, ease: "expo.out" }, 0);
 
+            // Shaker shockwave
             tl.to(mesh.position, {
                 x: targetX + (Math.random() - 0.5) * 0.03,
                 y: targetY + (Math.random() - 0.5) * 0.03,
@@ -292,8 +271,6 @@
         }
 
         function resetView() {
-            document.getElementById('back-btn').classList.remove('active');
-
             const tl = gsap.timeline();
             tl.to(mesh.scale, { x: 1, y: 1, duration: 1.2, ease: "power3.inOut" }, 0);
             tl.to(mesh.position, { x: 0, y: 0, duration: 1.2, ease: "power3.inOut" }, 0);
@@ -305,7 +282,7 @@
             });
         }
 
-        // --- 7. Aspect Auto Sizing ---
+        // --- 7. Responsive Calculations ---
         function updatePlaneScale() {
             if (!textureBefore.image) return;
             
@@ -323,7 +300,6 @@
                 h = w / imageAspect;
             }
             
-            // Constrain SVG interface overlay dimensions to fit the WebGL rendering frame exactly
             uiOverlay.style.width = `${w}px`;
             uiOverlay.style.height = `${h}px`;
 
