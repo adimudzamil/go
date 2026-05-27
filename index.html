@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>PUBG Interactive Experience - Toggle Mode</title>
+    <title>PUBG Armor Vault — Cinematic Reveal</title>
     <style>
         body, html {
             margin: 0;
@@ -25,7 +25,7 @@
             z-index: 1;
         }
 
-        /* Clickable SVG UI layout layer */
+        /* SVG overlay — clickable hotspots (invisible hit zones) */
         #ui-overlay {
             position: absolute;
             top: 50%;
@@ -33,50 +33,57 @@
             transform: translate(-50%, -50%);
             z-index: 2;
             pointer-events: none;
-            transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            transition: opacity 0.35s cubic-bezier(0.2, 0.9, 0.4, 1.1);
         }
 
-        /* Outline Glow Paths */
+        /* Glowing outlines that react on hover */
         .outline-path {
             fill: transparent;
-            stroke: rgba(0, 204, 255, 0.8);
-            stroke-width: 3;
-            stroke-dasharray: 8 4;
+            stroke: rgba(0, 204, 255, 0.85);
+            stroke-width: 3.2;
+            stroke-dasharray: 10 6;
             opacity: 0;
             pointer-events: auto;
             cursor: pointer;
-            transition: opacity 0.3s, stroke-dashoffset 2s linear;
+            transition: opacity 0.25s ease, stroke-dashoffset 0.8s linear;
+            filter: drop-shadow(0 0 2px rgba(0,204,255,0.3));
         }
         
         .outline-path:hover {
-            opacity: 1;
-            stroke-dashoffset: -50;
-            filter: drop-shadow(0px 0px 8px rgba(0, 204, 255, 0.9));
+            opacity: 1 !important;
+            stroke-dashoffset: -24;
+            filter: drop-shadow(0px 0px 12px rgba(0, 204, 255, 0.8));
         }
 
-        /* Floating Tooltip UI Element */
+        /* Premium tooltip */
         #tooltip {
             position: absolute;
-            z-index: 3;
-            background: rgba(10, 25, 40, 0.85);
-            border: 1px solid rgba(0, 204, 255, 0.5);
-            color: #ffffff;
-            padding: 8px 16px;
-            border-radius: 4px;
-            font-size: 14px;
+            z-index: 10;
+            background: rgba(8, 20, 32, 0.9);
+            backdrop-filter: blur(8px);
+            border-left: 3px solid #00ccff;
+            border-radius: 4px 12px 12px 4px;
+            color: #eef5ff;
+            padding: 6px 14px;
+            font-size: 13px;
             font-weight: 700;
-            letter-spacing: 1px;
-            box-shadow: 0 4px 15px rgba(0, 204, 255, 0.25), inset 0 0 8px rgba(0,204,255,0.1);
-            backdrop-filter: blur(4px);
-            -webkit-backdrop-filter: blur(4px);
+            letter-spacing: 1.2px;
+            font-family: monospace;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.4), 0 0 0 1px rgba(0,204,255,0.3);
             pointer-events: none;
+            white-space: nowrap;
             opacity: 0;
-            transform: translate(-50%, -130%) scale(0.9);
-            transition: opacity 0.2s, transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            transform: translate(-50%, -130%) scale(0.92);
+            transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.2, 0.9, 0.4, 1.2);
         }
         #tooltip.active {
             opacity: 1;
             transform: translate(-50%, -130%) scale(1);
+        }
+
+        /* subtle status helper */
+        .interaction-lock {
+            pointer-events: none;
         }
     </style>
 
@@ -87,238 +94,357 @@
 
     <div id="canvas-container"></div>
 
-    <svg id="ui-overlay" viewBox="0 0 768 1024">
+    <svg id="ui-overlay" viewBox="0 0 768 1024" style="pointer-events: none;">
+        <!-- Helmet hotspot silhouette -->
         <path id="path-helmet" class="outline-path" data-item="helmet"
               d="M 28,452 C 28,420 50,380 100,378 C 150,376 175,410 195,430 C 210,445 195,485 160,495 C 120,505 50,490 28,452 Z" />
         
+        <!-- Tactical vest hotspot -->
         <path id="path-vest" class="outline-path" data-item="vest"
               d="M 125,750 C 120,740 160,735 200,738 C 240,740 250,755 260,780 C 270,810 290,850 280,920 C 270,955 160,965 120,950 C 95,940 90,830 110,790 Z" />
     </svg>
 
-    <div id="tooltip">BPM</div>
+    <div id="tooltip">🎯 TACTICAL GEAR</div>
 
     <script>
-        // --- 1. Configurations & State Mapping ---
-        const HOTSPOTS = {
-            helmet: { x: 0.11, y: 0.56, radius: 0.09 }, 
-            vest:   { x: 0.24, y: 0.16, radius: 0.15 }
-        };
-
-        let isZoomed = false; // State flag tracker
-        const tooltip = document.getElementById('tooltip');
-        const uiOverlay = document.getElementById('ui-overlay');
-
-        // --- 2. Three.js Engine Setup ---
-        const container = document.getElementById('canvas-container');
-        const scene = new THREE.Scene();
-        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-        
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        container.appendChild(renderer.domElement);
-
-        // --- 3. Textures Asset Pipeline ---
-        const textureLoader = new THREE.TextureLoader();
-        const textureBefore = textureLoader.load('before.png', () => { updatePlaneScale(); });
-        const textureAfter = textureLoader.load('after.png');
-
-        textureBefore.minFilter = THREE.LinearFilter;
-        textureAfter.minFilter = THREE.LinearFilter;
-
-        // --- 4. Cross-fade Fragment Shader ---
-        const shaderMaterial = new THREE.ShaderMaterial({
-            uniforms: {
-                uTexBefore: { value: textureBefore },
-                uTexAfter: { value: textureAfter },
-                uTransitionProgress: { value: 0.0 },
-                uEpicenter: { value: new THREE.Vector2(0.5, 0.5) },
-                uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) }
-            },
-            vertexShader: `
-                varying vec2 vUv;
-                void main() { vUv = uv; gl_Position = vec4(position, 1.0); }
-            `,
-            fragmentShader: `
-                varying vec2 vUv;
-                uniform sampler2D uTexBefore;
-                uniform sampler2D uTexAfter;
-                uniform float uTransitionProgress;
-                uniform vec2 uEpicenter;
-                uniform vec2 uResolution;
-
-                void main() {
-                    vec2 aspectCorrectedUv = vUv;
-                    aspectCorrectedUv.x *= (uResolution.x / uResolution.y);
-                    vec2 correctedEpicenter = uEpicenter;
-                    correctedEpicenter.x *= (uResolution.x / uResolution.y);
-
-                    float dist = distance(aspectCorrectedUv, correctedEpicenter);
-                    float radius = uTransitionProgress * 2.5; 
+        (function() {
+            // ----------------------------- STATE & FLAGS -------------------------
+            let isZoomed = false;          // view mode: true = after-explosion zoom state
+            let isAnimating = false;        // prevents overlapping animations & inconsistent clicks
+            let currentTween = null;        // reference for killing ongoing tweens safely
+            
+            // Hotspot UV coordinates (relative to texture, based on art direction)
+            const HOTSPOTS = {
+                helmet: { x: 0.112, y: 0.565, radius: 0.095 }, 
+                vest:   { x: 0.245, y: 0.165, radius: 0.152 }
+            };
+            
+            // DOM elements
+            const tooltip = document.getElementById('tooltip');
+            const uiOverlay = document.getElementById('ui-overlay');
+            const container = document.getElementById('canvas-container');
+            
+            // ----------------------------- THREE.JS CORE -------------------------
+            const scene = new THREE.Scene();
+            // Orthographic camera for fullscreen quad (NDC space)
+            const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+            const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x050505, 1);
+            container.appendChild(renderer.domElement);
+            
+            // Textures (before = standard gear, after = enhanced/upgraded look)
+            const textureLoader = new THREE.TextureLoader();
+            // Use high-quality filtering
+            const textureBefore = textureLoader.load('before.png', () => { updatePlaneScale(); });
+            const textureAfter = textureLoader.load('after.png');
+            textureBefore.minFilter = THREE.LinearFilter;
+            textureBefore.magFilter = THREE.LinearFilter;
+            textureAfter.minFilter = THREE.LinearFilter;
+            textureAfter.magFilter = THREE.LinearFilter;
+            
+            // ---------------------------- SHADER (Radial Reveal + Edge Softness) ---
+            const shaderMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTexBefore: { value: textureBefore },
+                    uTexAfter: { value: textureAfter },
+                    uTransitionProgress: { value: 0.0 },
+                    uEpicenter: { value: new THREE.Vector2(0.5, 0.5) },
+                    uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) }
+                },
+                vertexShader: `
+                    varying vec2 vUv;
+                    void main() {
+                        vUv = uv;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    varying vec2 vUv;
+                    uniform sampler2D uTexBefore;
+                    uniform sampler2D uTexAfter;
+                    uniform float uTransitionProgress;
+                    uniform vec2 uEpicenter;
+                    uniform vec2 uResolution;
                     
-                    float edgeSmoothness = 0.18;
-                    float wave = smoothstep(radius - edgeSmoothness, radius, dist);
-
-                    vec4 colorBefore = texture2D(uTexBefore, vUv);
-                    vec4 colorAfter = texture2D(uTexAfter, vUv);
-                    gl_FragColor = mix(colorAfter, colorBefore, wave);
+                    void main() {
+                        // aspect-ratio correction for circular distortion
+                        float aspect = uResolution.x / uResolution.y;
+                        vec2 correctedUv = vUv;
+                        correctedUv.x *= aspect;
+                        vec2 correctedCenter = vec2(uEpicenter.x * aspect, uEpicenter.y);
+                        
+                        float dist = distance(correctedUv, correctedCenter);
+                        float radius = uTransitionProgress * 2.4;   // expands from epicenter
+                        float edgeSoftness = 0.16;
+                        
+                        // smooth transition: inside radius reveals AFTER texture, outside keeps BEFORE
+                        float wave = smoothstep(radius - edgeSoftness, radius, dist);
+                        // wave = 0 -> fully after, wave = 1 -> fully before.
+                        vec4 colorBefore = texture2D(uTexBefore, vUv);
+                        vec4 colorAfter = texture2D(uTexAfter, vUv);
+                        gl_FragColor = mix(colorAfter, colorBefore, wave);
+                    }
+                `
+            });
+            
+            const geometry = new THREE.PlaneGeometry(2, 2);
+            const mesh = new THREE.Mesh(geometry, shaderMaterial);
+            scene.add(mesh);
+            
+            // Helper to kill ongoing GSAP animations to avoid conflicts
+            function killOngoingTweens() {
+                if (currentTween) {
+                    currentTween.kill();
+                    currentTween = null;
                 }
-            `
-        });
-
-        const geometry = new THREE.PlaneGeometry(2, 2);
-        const mesh = new THREE.Mesh(geometry, shaderMaterial);
-        scene.add(mesh);
-
-        // --- 5. Integrated Interactive Event Listeners ---
-        const raycaster = new THREE.Raycaster();
-        const mouse = new THREE.Vector2();
-
-        function checkIntersect(clientX, clientY) {
-            mouse.x = (clientX / window.innerWidth) * 2 - 1;
-            mouse.y = -(clientY / window.innerHeight) * 2 + 1;
-
-            raycaster.setFromCamera(mouse, camera);
-            const intersects = raycaster.intersectObject(mesh);
-
-            if (intersects.length > 0) {
+                // kill any tweens on mesh properties and shader uniform
+                gsap.killTweensOf(mesh.scale);
+                gsap.killTweensOf(mesh.position);
+                gsap.killTweensOf(shaderMaterial.uniforms.uTransitionProgress);
+            }
+            
+            // ----------------------------- INTERSECTION LOGIC (UV HOTSPOTS) ----------
+            const raycaster = new THREE.Raycaster();
+            const mouseVec = new THREE.Vector2();
+            
+            function getHitHotspot(clientX, clientY) {
+                if (isZoomed) return null;  // zoomed mode: no hotspot interaction
+                if (isAnimating) return null; // during animation ignore additional triggers
+                
+                // convert screen to NDC
+                mouseVec.x = (clientX / window.innerWidth) * 2 - 1;
+                mouseVec.y = -(clientY / window.innerHeight) * 2 + 1;
+                
+                raycaster.setFromCamera(mouseVec, camera);
+                const intersects = raycaster.intersectObject(mesh);
+                if (intersects.length === 0) return null;
+                
                 const uv = intersects[0].uv;
-                for (const key in HOTSPOTS) {
-                    const spot = HOTSPOTS[key];
-                    if (Math.hypot(uv.x - spot.x, uv.y - spot.y) < spot.radius) {
+                if (!uv) return null;
+                
+                for (const [key, spot] of Object.entries(HOTSPOTS)) {
+                    const dx = uv.x - spot.x;
+                    const dy = uv.y - spot.y;
+                    const distSq = dx*dx + dy*dy;
+                    if (distSq < spot.radius * spot.radius) {
                         return { name: key, uv: uv };
                     }
                 }
+                return null;
             }
-            return null;
-        }
-
-        // Mouse move interactions (Only track highlights if zoomed out)
-        window.addEventListener('mousemove', (e) => {
-            if (isZoomed) return;
-
-            const hit = checkIntersect(e.clientX, e.clientY);
             
-            if (hit) {
-                document.querySelectorAll('.outline-path').forEach(p => p.style.opacity = '0');
-                const path = document.getElementById(`path-${hit.name}`);
-                if (path) path.style.opacity = '1';
-
-                if (hit.name === 'helmet') {
-                    tooltip.style.left = `${e.clientX}px`;
-                    tooltip.style.top = `${e.clientY}px`;
-                    tooltip.classList.add('active');
-                } else {
+            // Update SVG outlines opacity & tooltip based on hover (only when not zoomed & not animating)
+            function handleHover(e) {
+                if (isZoomed || isAnimating) {
+                    document.querySelectorAll('.outline-path').forEach(p => p.style.opacity = '0');
                     tooltip.classList.remove('active');
+                    return;
                 }
-            } else {
-                document.querySelectorAll('.outline-path').forEach(p => p.style.opacity = '0');
-                tooltip.classList.remove('active');
-            }
-        });
-
-        // Toggle state logic on Click
-        window.addEventListener('click', (e) => {
-            if (isZoomed) {
-                // If already zoomed in, clicking anywhere resets the view back to normal
-                resetView();
-            } else {
-                // If zoomed out, check if an item was targeted
-                const hit = checkIntersect(e.clientX, e.clientY);
+                
+                const hit = getHitHotspot(e.clientX, e.clientY);
                 if (hit) {
+                    // show only the specific outline
+                    document.querySelectorAll('.outline-path').forEach(p => p.style.opacity = '0');
+                    const activePath = document.getElementById(`path-${hit.name}`);
+                    if (activePath) activePath.style.opacity = '1';
+                    
+                    // custom tooltip text based on item
+                    if (hit.name === 'helmet') {
+                        tooltip.innerHTML = '⚡ HELMET LV.3 • UPGRADE';
+                        tooltip.style.left = `${e.clientX}px`;
+                        tooltip.style.top = `${e.clientY}px`;
+                        tooltip.classList.add('active');
+                    } else if (hit.name === 'vest') {
+                        tooltip.innerHTML = '🛡️ TACTICAL VEST • CERAMIC PLATE';
+                        tooltip.style.left = `${e.clientX}px`;
+                        tooltip.style.top = `${e.clientY}px`;
+                        tooltip.classList.add('active');
+                    } else {
+                        tooltip.classList.remove('active');
+                    }
+                } else {
+                    document.querySelectorAll('.outline-path').forEach(p => p.style.opacity = '0');
                     tooltip.classList.remove('active');
-                    uiOverlay.style.opacity = '0';
-                    triggerExplosion(hit.uv.x, hit.uv.y);
                 }
             }
-        });
-
-        // Touch device toggle support
-        window.addEventListener('touchstart', (e) => {
-            if (e.touches.length > 0) {
-                const touch = e.touches[0];
+            
+            // debounced mousemove for better performance
+            let hoverTimeout;
+            window.addEventListener('mousemove', (e) => {
+                if (hoverTimeout) cancelAnimationFrame(hoverTimeout);
+                hoverTimeout = requestAnimationFrame(() => handleHover(e));
+            });
+            
+            // ----------------------------- EXPLOSION & RESET WITH TRANSITION LOCK ----------
+            function triggerExplosion(clickUV_x, clickUV_y, hotspotName) {
+                if (isAnimating) return;        // already in transition
+                if (isZoomed) return;            // already zoomed state must reset first
+                
+                isAnimating = true;
+                // kill any leftover tweens to ensure clean start
+                killOngoingTweens();
+                
+                // set epicenter exactly where user clicked
+                shaderMaterial.uniforms.uEpicenter.value.set(clickUV_x, clickUV_y);
+                
+                // fade out UI overlay for immersion
+                uiOverlay.style.opacity = '0';
+                
+                // create robust timeline with callbacks
+                const tl = gsap.timeline({
+                    onComplete: () => {
+                        isZoomed = true;
+                        isAnimating = false;
+                        currentTween = null;
+                    },
+                    onUpdate: () => {
+                        // force render update (already handled by animate loop, but just safety)
+                    }
+                });
+                
+                currentTween = tl;
+                
+                // radial reveal: transitionProgress 0 → 1 (full after texture)
+                tl.to(shaderMaterial.uniforms.uTransitionProgress, {
+                    value: 1.0,
+                    duration: 1.2,
+                    ease: "power2.out"
+                }, 0);
+                
+                // dynamic zoom & dramatic push toward the clicked point
+                const targetScaleX = 2.6;
+                const targetScaleY = 2.6;
+                const offsetX = (0.5 - clickUV_x) * 2.8;
+                const offsetY = (clickUV_y - 0.5) * 2.8;
+                
+                tl.to(mesh.scale, {
+                    x: targetScaleX,
+                    y: targetScaleY,
+                    duration: 1.3,
+                    ease: "expo.out"
+                }, 0);
+                
+                tl.to(mesh.position, {
+                    x: offsetX,
+                    y: offsetY,
+                    duration: 1.3,
+                    ease: "expo.out"
+                }, 0);
+                
+                // cinematic shockwave micro-shake (adds punch)
+                tl.to(mesh.position, {
+                    x: offsetX + (Math.random() - 0.5) * 0.045,
+                    y: offsetY + (Math.random() - 0.5) * 0.045,
+                    duration: 0.035,
+                    repeat: 5,
+                    yoyo: true,
+                    ease: "none"
+                }, 0.15);
+            }
+            
+            function resetView() {
+                // Prevent reset if already resetting / animating or if already in normal state
+                if (isAnimating) return;
+                if (!isZoomed) return;   // already normal view, no need to reset
+                
+                isAnimating = true;
+                killOngoingTweens();
+                
+                const tl = gsap.timeline({
+                    onComplete: () => {
+                        isZoomed = false;
+                        isAnimating = false;
+                        currentTween = null;
+                        // restore UI overlay so hotspots become visible again
+                        uiOverlay.style.opacity = '1';
+                        // force any lingering outline hide
+                        document.querySelectorAll('.outline-path').forEach(p => p.style.opacity = '0');
+                        tooltip.classList.remove('active');
+                    }
+                });
+                currentTween = tl;
+                
+                // shrink scale back to 1:1
+                tl.to(mesh.scale, {
+                    x: 1,
+                    y: 1,
+                    duration: 1.1,
+                    ease: "power3.inOut"
+                }, 0);
+                // recenter position
+                tl.to(mesh.position, {
+                    x: 0,
+                    y: 0,
+                    duration: 1.1,
+                    ease: "power3.inOut"
+                }, 0);
+                // fade transition back to BEFORE texture (progress 0)
+                tl.to(shaderMaterial.uniforms.uTransitionProgress, {
+                    value: 0.0,
+                    duration: 0.9,
+                    ease: "power2.inOut"
+                }, 0.05);
+            }
+            
+            // ----------------------------- CLICK & TOUCH HANDLERS (RELIABLE STATE) ---
+            function onClickHandler(clientX, clientY) {
+                if (isAnimating) return;      // ignore clicks during ongoing animation
+                
                 if (isZoomed) {
+                    // zoomed mode: any click resets the experience to normal view
                     resetView();
                 } else {
-                    const hit = checkIntersect(touch.clientX, touch.clientY);
+                    // normal mode: try to detect hotspot click
+                    const hit = getHitHotspot(clientX, clientY);
                     if (hit) {
-                        uiOverlay.style.opacity = '0';
-                        triggerExplosion(hit.uv.x, hit.uv.y);
+                        // hide tooltip instantly for better UX
+                        tooltip.classList.remove('active');
+                        triggerExplosion(hit.uv.x, hit.uv.y, hit.name);
                     }
                 }
             }
-        }, { passive: true });
-
-        // --- 6. Core Animations ---
-        function triggerExplosion(clickX, clickY) {
-            isZoomed = true;
-            shaderMaterial.uniforms.uEpicenter.value.set(clickX, clickY);
-
-            const tl = gsap.timeline();
-            tl.to(shaderMaterial.uniforms.uTransitionProgress, { value: 1.0, duration: 1.3, ease: "power2.out" }, 0);
-            tl.to(mesh.scale, { x: 2.5, y: 2.5, duration: 1.5, ease: "expo.out" }, 0);
-
-            const targetX = (0.5 - clickX) * 2.5;
-            const targetY = (clickY - 0.5) * 2.5;
-            tl.to(mesh.position, { x: targetX, y: targetY, duration: 1.5, ease: "expo.out" }, 0);
-
-            // Shaker shockwave
-            tl.to(mesh.position, {
-                x: targetX + (Math.random() - 0.5) * 0.03,
-                y: targetY + (Math.random() - 0.5) * 0.03,
-                duration: 0.04, repeat: 4, yoyo: true
-            }, 0.05);
-        }
-
-        function resetView() {
-            const tl = gsap.timeline();
-            tl.to(mesh.scale, { x: 1, y: 1, duration: 1.2, ease: "power3.inOut" }, 0);
-            tl.to(mesh.position, { x: 0, y: 0, duration: 1.2, ease: "power3.inOut" }, 0);
-            tl.to(shaderMaterial.uniforms.uTransitionProgress, { value: 0.0, duration: 0.9, ease: "power2.inOut" }, 0.1);
-
-            tl.call(() => { 
-                isZoomed = false; 
-                uiOverlay.style.opacity = '1';
+            
+            // Mouse click handler
+            window.addEventListener('click', (e) => {
+                onClickHandler(e.clientX, e.clientY);
             });
-        }
-
-        // --- 7. Responsive Calculations ---
-        function updatePlaneScale() {
-            if (!textureBefore.image) return;
             
-            const imageAspect = 3 / 4; 
-            const screenAspect = window.innerWidth / window.innerHeight;
-
-            let w, h;
-            if (screenAspect > imageAspect) {
-                mesh.scale.set(1, 1 / (screenAspect / imageAspect), 1);
-                h = window.innerHeight;
-                w = h * imageAspect;
-            } else {
-                mesh.scale.set((screenAspect / imageAspect), 1, 1);
-                w = window.innerWidth;
-                h = w / imageAspect;
-            }
+            // Touch events for mobile (prevent scroll interference)
+            window.addEventListener('touchstart', (e) => {
+                if (e.touches.length) {
+                    const touch = e.touches[0];
+                    onClickHandler(touch.clientX, touch.clientY);
+                    e.preventDefault();  // avoid zooming page while interacting
+                }
+            }, { passive: false });
             
-            uiOverlay.style.width = `${w}px`;
-            uiOverlay.style.height = `${h}px`;
-
-            shaderMaterial.uniforms.uResolution.value.set(
-                window.innerWidth * window.devicePixelRatio, 
-                window.innerHeight * window.devicePixelRatio
-            );
-        }
-
-        window.addEventListener('resize', () => {
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            updatePlaneScale();
-        });
-
-        function animate() {
-            requestAnimationFrame(animate);
-            renderer.render(scene, camera);
-        }
-        animate();
-    </script>
-</body>
-</html>
+            // Also prevent context menu on long press (clean UI)
+            window.addEventListener('contextmenu', (e) => e.preventDefault());
+            
+            // ----------------------------- RESPONSIVE RESIZE & OVERLAY SYNC ----------
+            function updatePlaneScale() {
+                if (!textureBefore.image) return;
+                
+                // maintain original aspect ratio (4:3 typical, but we use 3/4 from design)
+                const imgAspect = 3 / 4;    // because original assets are portrait 768x1024
+                const screenAspect = window.innerWidth / window.innerHeight;
+                
+                let displayWidth, displayHeight;
+                if (screenAspect > imgAspect) {
+                    // screen is wider: scale by height
+                    displayHeight = window.innerHeight;
+                    displayWidth = displayHeight * imgAspect;
+                    mesh.scale.set(1, 1 / (screenAspect / imgAspect), 1);
+                } else {
+                    displayWidth = window.innerWidth;
+                    displayHeight = displayWidth / imgAspect;
+                    mesh.scale.set((screenAspect / imgAspect), 1, 1);
+                }
+                
+                // sync SVG overlay dimensions to exactly match visible texture
+                uiOverlay.style.width = `${displayWidth}px`;
+                uiOverlay.style.height = `${displayHeight}px`;
+                
+                // update shader resolution for aspect correction (pi
